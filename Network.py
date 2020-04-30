@@ -11,6 +11,9 @@ import matplotlib.pyplot as plt
 import os
 from sklearn.preprocessing import OneHotEncoder
 from PIL import Image
+import time
+import pickle
+
 '''
 Depending on your choice of library you have to install that library using pip
 
@@ -27,7 +30,7 @@ Numpy already has vectorized functions for addition and subtraction and even for
 For transpose just do a.T where a is a numpy array 
 Also search how to call a static method in a class.
 If there is some error. You will get error in shapes dimensions not matched
-because a*b !=b*a in matrices
+because a*b != b*a in matrices
 '''
 
 def read_filelines(fileName, split_char='\n'): # file lines excluding any empty line ending
@@ -37,11 +40,13 @@ def read_filelines(fileName, split_char='\n'): # file lines excluding any empty 
             filelines.pop()
     return filelines
 
+def format_time(raw_time):
+    return time.strftime("%H:%M:%S", time.gmtime(raw_time))
 
 class NeuralNetwork():
 
-    @staticmethod
     #note the self argument is missing i.e. why you have to search how to use static methods/functions
+    @staticmethod
     def cross_entropy_loss(y_pred, y_true): # ✅
         '''implement cross_entropy loss error function here
         Hint: Numpy has a sum function already
@@ -57,6 +62,7 @@ class NeuralNetwork():
         Accuracy = (number of same elements at same position in both arrays)/total length of any array
         Ex-> y_pred = np.array([1,2,3]) y_true=np.array([1,2,4]) Accuracy = 2/3*100 (2 Matches and 1 Mismatch)'''
         total_length = float(len(y_pred))
+        y_pred, y_true = np.array(y_pred), np.array(y_true)
         # using list comprehension, every match of a y_pred and y_true element contributes a 1 to the numerator (sum of matches)
         return np.sum(y_pred == y_true) / total_length
     
@@ -114,23 +120,42 @@ class NeuralNetwork():
         '''Trains the model on the given dataset for "epoch" number of iterations with step size="lr". 
         Returns list containing loss for each epoch.'''
         history = []
-        
-        input_data = Xs
-        layer_activations = self.forward_pass(input_data) # forward pass returns the neuron activations for the sample input data Xs
-        deltas = self.backward_pass(Ys, layer_activations) # backward pass uses the targets (Ys) and activations from forward pass to calculate deltas
-        
-        # list containing input for all layers
-        layer_inputs = input_data + (layer_activations[:-1]) # all 'hidden layer' activations added with input_data (output activations excluded)
-        self.weight_update(deltas, layer_inputs, lr) # use results to execute gradient descent to update weights, with lr as step size
+        total_images = Xs.shape[0]
 
-        y_pred = self.predict(Xs) # predicts output of last layer for given input data / Xs
-        epoch_loss = cross_entropy_loss(y_pred, Ys) # Ys has true/test labels
-        history.append(epoch_loss) # loss value for the current epoch / iteration stored in history
+        print(f"Training model for {epochs} epochs...")
+        execution_start_time = time.time()
+        for e in range(epochs):
+            # Xs has multiple images (rows) and Ys has multiple corresponding targets, evaluate them one by one
+            
+            elapsed_time = time.time()
+            for i in range(total_images):
+                if i%5000 == 0:
+                    elapsed_time = time.time() - elapsed_time
+                    print(f"Images processed: {i}, Elapsed time", format_time(elapsed_time), "...")
+
+                input_image = Xs[i].reshape((1,self.input_shape))
+                target = Ys[i].reshape((1,self.output_shape))
+                # print(input_image.shape)
+                layer_activations = self.forward_pass(input_image) # forward pass returns the neuron activations for the sample input image
+                deltas = self.backward_pass(target, layer_activations) # backward pass uses the targets and activations from forward pass to calculate deltas
+                
+                # list containing inputs for all layers (input->hidden + hidden->output) 
+                layer_inputs = [input_image, layer_activations[0]] # inputs from input layer and hidden layer(activations) combined 
+                self.weight_update(deltas, layer_inputs, lr) # use results to execute gradient descent to update weights, with lr as step size
+
+            epoch_loss, epoch_accuracy = self.evaluate(Xs, Ys)
+            history.append(epoch_loss) # loss value for the current epoch / iteration stored in history
+
+            print(f"Epoch Number {e} -------> {epoch_accuracy * total_images}/{total_images} images correctly classified")
+            print(f"Accuracy {epoch_accuracy*100} % ------------------- Error {100-epoch_accuracy*100} %")
+        
+        execution__time = time.time() - execution_start_time
+        print(f"Execution time {format_time(execution__time)} (HH:MM:SS)")
 
         return history
     
     
-    def forward_pass(self, input_data):
+    def forward_pass(self, input_data): # ✅  
         '''Executes the feed forward algorithm.
         "input_data" is the input to the network in row-major form
         Returns "activations", which is a list of all layer outputs (excluding input layer of course)
@@ -141,25 +166,21 @@ class NeuralNetwork():
         A sigmoid neuron activation is y = sigmoid(w1.T*x+b1) for 1st hidden layer 
         Now for the last hidden layer the activation y = sigmoid(w2.T*y+b2).
         '''
-        activations = []
+        activations = [] # activation = squished weighted sum of activations in previous layer + bias for inactivity threshold
 
-        w1, b1 = self.weights_[0], self.biases_[0] # weights and biases for 1st hidden layer
-        y1 = sigmoid(np.dot(w1, input_data) + b1)
-        activations.append(y1) # y1, activation in the 1st hidden layer
+        wh, bh = self.weights_[0], self.biases_[0] # weights and biases for hidden layer
+        zh = np.dot(input_data, wh) + bh  # z(L) = wL * a(L-1) + b(L)        
+        ah = NeuralNetwork.sigmoid(zh) # a(L)= sigmoid(z(L))  or  y = sigmoid(wh.T*x+bh)
         
-        for i in range (1, self.num_layers-2): # excluding the first hidden layer (index 0) and last index output layer
-            wi, bi = self.weights_[i], self.biases_[i] # if there were more hidden layers than just 1
-            yi = sigmoid(np.dot(wi, activations[-1]) + bi) # input is now the previous layer's activations
-            activations.append(yi) # calculate activations for all layers in between as well
-        
-        wo, bo = self.weights_[-1], self.biases_[-1] # last weights and biases belong to output layer
-        yo = sigmoid(np.dot(wo, activations[-1]) + bo) # input is now the last hidden layer to get activation for output layer
-        activations.append(yo)
+        wo, bo = self.weights_[1], self.biases_[1] # last weights and biases belong to output layer
+        zo = np.dot(ah, wo) + bo
+        ao = NeuralNetwork.sigmoid(zo) # input is now the last hidden layer to get activation for output layer
 
+        activations = [ah, ao]
         return activations
     
 
-    def backward_pass(self, targets, layer_activations):
+    def backward_pass(self, targets, layer_activations): # ✅
         '''Executes the back-propagation algorithm.
         "targets" is the ground truth/labels
         "layer_activations" are the return value of the forward pass step
@@ -167,13 +188,47 @@ class NeuralNetwork():
         You need to work on the paper to develop a generalized formulae before implementing this.
         Chain rule and derivatives are the pre-requisite for this part.
         '''
-        deltas = []
+        deltas = [] # gradient vector for weights
+        '''
+        y = targets
+        sensitivity to weights:
+            w(L) = weights for layer L, z(L) = w(L)*a(L-1) + b(L) for layer L
+            a(L) = activations for layer L (sigmoid(z(L))), and C0 is the cost function = summation of (a(jL)-y)^2
+            pC0 / pw(L) = pz(L) / pw(L)  * pa(L) / pz(L) * pC0 / pa(L) using the chain rule
+            pC0 / pw(L) = deriv of sigmoid(z(L)) * a(L-1) * 2(aL-y)
+            neurons that fire together, wire together - change in cost depends on a(L-1) in last partial
+        sensitivity to bias:
+            pC0 / pb(L) = deriv of sigmoid(z(L)) * 2(aL-y)
+        sensitivity to previous activation:
+            pC0 / pa(L-1) = w(L) * deriv of sigmoid(z(L)) * 2(a(L)-y)
+            pC0 / pa(L-1) = w(L) * (a(L) * (1 - a(L))) * (a(L)-y)
+            summations and indices hidden
+        acknowledgements: 3Blue1Brown, neuralnetworksanddeeplearning.com
+        '''
+
+        y = targets
+        ah, ao = layer_activations[0], layer_activations[1] # activation in (first and only here) hidden layer
+        # and activation in output layer
+        wo = self.weights_[1]
+
+        # going backwards, output layer first
+        # ∂C/∂aLj=(aLj−yj)
+        cost_aoj = (ao - y) # error in output layer, depends on firstly 
+        # from derivative of cost function wrt activation from a(L-1), w(L), b(L) 
+        sigmoid_prime_o = ao * (1 - ao) # derivative of activation a0 OR also sigmoid(z(L))
+        # since d sigmoid(x) / d(x) = sigmoid(x) * (1 - sigmoid(x))
+        δ_wo = cost_aoj * sigmoid_prime_o # Hadamard product computed since both are arrays - delta (weight update value) for output layer
         
+        # for the next hidden layer layer (wl+1)Tδx,l+1) is used to get cost_ahj
+        cost_ahj = (np.dot(wo, δ_wo.T)).T
+        sigmoid_prime_h = ah * (1 - ah)
+        δ_wh = cost_ahj * sigmoid_prime_h
         
+        deltas = [δ_wh, δ_wo] # correct order
         return deltas
             
             
-    def weight_update(self, deltas, layer_inputs, lr):
+    def weight_update(self, deltas, layer_inputs, lr): # ✅
         '''Executes the gradient descent algorithm.
         "deltas" is return value of the backward pass step
         "layer_inputs" is a list containing the inputs for all layers (including the input layer)
@@ -181,20 +236,39 @@ class NeuralNetwork():
         You just have to implement the simple weight update equation. 
         
         '''
+        [ah, ao] = layer_inputs
+        [δ_wh, δ_wo] = deltas
         
+        self.weights_[1] -= lr * np.dot(ao.T, δ_wo) # gradient descent rule for weights
+        # update factor => - learning rate * ∑x δ(x,l) * (ax(L−1)).T
+        self.biases_[1] -= lr * np.sum(δ_wo)
 
-    def predict(self, Xs):
+        self.weights_[0] -= lr * np.dot(ah.T, δ_wh)
+        self.biases_[0] -= lr * np.sum(δ_wh)
+        
+ 
+
+    def predict(self, Xs): # ✅
         '''Returns the model predictions (output of the last layer) for the given "Xs".'''
         predictions = []
-        
+        for i in range (Xs.shape[0]): # for image i in input data
+            # extract the ith row in input data Xs
+            current_image = np.array([Xs[i]]) # as a column with a single row vector
+            current_prediction = (self.forward_pass(current_image)[-1]).reshape(self.output_shape) 
+            # output of last layer (activation from  forward pass) for current sample image is a column vector,
+            # so it is flattened to a row vector with reshape == becoming the current prediction
+            predictions.append(current_prediction)
+
+        predictions = np.array(predictions) # convert to np array from list
         return predictions
     
 
-    def evaluate(self, Xs, Ys):
+    def evaluate(self, Xs, Ys): # ✅  
         '''Returns appropriate metrics for the task, calculated on the dataset passed to this method.'''
         pred = self.predict(Xs)
-        acc = self.accuracy(Xs, Ys) 
-        loss = None 
+        # acc = NeuralNetwork.accuracy(Xs, Ys) 
+        acc = NeuralNetwork.accuracy(pred.argmax(axis=1), Ys.argmax(axis=1))
+        loss = NeuralNetwork.cross_entropy_loss(pred, Ys) # y_pred/pred == predicted labels, Ys == true/test labels
         return loss,acc
         
 
@@ -236,7 +310,7 @@ class NeuralNetwork():
         Hint: Use sklearn one hot-encoder to convert your labels into one hot encoding array
         "onehotlabels" is a numpy array of labels. In the end just do np.array(onehotlabels).
         '''
-        labels_column = labels.reshape(-1, 1) # as the hot encoder requires a column vector
+        labels_column = np.array(labels).reshape(-1, 1) # as the hot encoder requires a column vector
         onehotlabels = OneHotEncoder().fit_transform(labels_column).toarray() # construct, fit to labels and transform
         return np.array(onehotlabels)
 
@@ -244,57 +318,59 @@ class NeuralNetwork():
     def save_weights(self,fileName): # ✅  
         '''save the weights of your neural network into a file
         Hint: Search python functions for file saving as a .txt'''
-        with open(fileName, 'w') as f: # with, closes the file on read/write finish as loop ends
-            for weight in self.weights_:
-                f.write("%s\n" % weight)
-
+        with open(fileName, 'wb') as outfile: # write binary mode
+            pickle.dump(self.weights_, outfile)
+        
 
     def reassign_weights(self,fileName): # ✅
         '''assign the saved weights from the fileName to the network
         Hint: Search python functions for file reading
         '''
-        with open(fileName) as file:  # Use file to refer to the file object
-            filelines = file.read().split('\n')
-            if filelines[-1] == '': # if there was an empty line at the end, remove it
-                filelines.pop()
-            self.weights_ = np.array(filelines, dtype=np.float32)
+        with open(fileName, 'rb') as infile: # read binary mode
+            self.weights_ = pickle.load(infile)
 
 
-    def savePlot(self):
+    def savePlot(self, execution_time, lr):
         '''function to plot the execution time versus learning rate plot
         You can edit the parameters passed to the savePlot function'''
         # plt.savefig(fileName)
 
 
 '''
-python3 assignment.py train train.txt train-labels.txt 1.54
-python3 assignment.py test test.txt test-labels.txt netWeights.txt
+python3 Network.py train train.txt train-labels.txt 1
+python3 Network.py test test.txt test-labels.txt netWeights.txt
 '''
 def main(): 
     train_file, test_file, train_labels_file, test_labels_file, net_weights_file = "", "", "", "", ""
-    learning_rate = 0.0
+    lr = 1 # picked from the three values (0.01, 0.1, 1) works amazing, moderately large step size required
     mode = sys.argv[1]
-
     NN = NeuralNetwork()
-    
+    np.random.seed(123) # for predictability
 
     if mode == "train":
         print("Reading training data from files... (This might take a while.)")
         train_file = sys.argv[2]
         train_labels_file = sys.argv[3]
-        learning_rate = float(sys.argv[4])
+        lr = float(sys.argv[4])
 
         train_filelines_mutated = read_filelines(train_file, ']')
         # remove \n in between with replace and remove [ as well, then split 
         # numbers through spaces in arrays and store np arrays with type as np.uint8 (255 max8 so 8 bit unsigned integer)
-        # x_train_map = map(lambda fileline : np.array(fileline.replace('\n', '')[1:].split(), dtype=np.uint8), train_filelines_mutated)
-        # x_train = np.array(list(x_train_map), dtype=np.uint8) # converted the map iter to get x_train as well
+        x_train_map = map(lambda fileline : fileline.replace('\n', '')[1:].split(), train_filelines_mutated)
+        x_train = np.array(list(x_train_map), dtype=np.float32) # converted the map iter to get x_train as well
         # x_train = array of flattened images from test dataset
-        # y_train = read_filelines(train_labels_file) # list of strings with all class labels for training dataset
-
         # x_train, y_train = NN.give_images("Raw+images/train") # optionally could have been done
+        x_train /= 255.0 # normalizing images rgb to 0-1
 
-        # NN.savePlot()
+        print("Reading labels...")
+        y_train = read_filelines(train_labels_file) # list of strings with all class labels for training dataset
+        y_train = NN.generate_labels(y_train) # convert labels to one hot encoded ones
+        
+        history = NN.fit(x_train, y_train, 2, lr)
+
+        # NN.savePlot("train_plot.jpg")
+        NN.save_weights("netWeights.txt")
+        
     
     elif mode == "test":
         print("Reading test data from files... (This might take a while.)")
@@ -303,17 +379,22 @@ def main():
         net_weights_file = sys.argv[4]
         
         test_filelines_mutated = read_filelines(test_file, ']')
-        # x_test_map = map(lambda fileline : np.array(fileline.replace('\n', '')[1:].split(), dtype=np.uint8), test_filelines_mutated)
-        # x_test = np.array(list(x_test_map), dtype=np.uint8) 
-        # y_test = read_filelines(test_labels_file)
-
+        x_test_map = map(lambda fileline : fileline.replace('\n', '')[1:].split(), test_filelines_mutated)
+        x_test = np.array(list(x_test_map), dtype=np.float32) 
         # x_test, y_test = NN.give_images("Raw+images/test") # optionally could have been done
-
+        x_test /= 255.0 # normalizing rgb to 0-1
+        
+        print("Reading labels...")
+        y_test = read_filelines(test_labels_file)
+        y_test = NN.generate_labels(y_test)
 
         if net_weights_file in os.listdir(): # if the net weights file already exists in the current directory
             NN.reassign_weights(net_weights_file) # read previous weights from it
 
-        NN.save_weights(net_weights_file)
-        
+        print("Evaluating tests...")
+        loss, accuracy = NN.evaluate(x_test, y_test)
+        print(f"Accuracy {accuracy*100} % ------------------- Error {100-accuracy*100} %")
+
+
 main()
 
