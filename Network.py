@@ -11,9 +11,8 @@ import matplotlib.pyplot as plt
 import os
 from sklearn.preprocessing import OneHotEncoder
 from PIL import Image
-import time
 import pickle
-
+plt.style.use('seaborn')
 '''
 Depending on your choice of library you have to install that library using pip
 
@@ -112,14 +111,16 @@ class NeuralNetwork():
             # np.random.uniform generates a random uniform distributed matrix within values low=-1 and high=1 in this case 
             weight_matrix = np.random.uniform(-1, 1, size=(nodes_per_layer[i-1], nodes_per_layer[i])) # shape == (last layer, current layer)
             self.weights_.append(weight_matrix)
-            bias_vector = np.zeros(nodes_per_layer[i]) # vector of zeros of size of nodes in current layer (each node/neuron has a bias)
+            bias_vector = np.random.uniform(-1, 1, size=(nodes_per_layer[i])) # vector of zeros of size of nodes in current layer (each node/neuron has a bias)
             self.biases_.append(bias_vector)
     
 
     def fit(self, Xs, Ys, epochs, lr=1e-3): # ✅ 
         '''Trains the model on the given dataset for "epoch" number of iterations with step size="lr". 
         Returns list containing loss for each epoch.'''
-        history = []
+        history = [] # epoch-wise history of losses
+        execution_history_loss = []
+        execution_history_accuracy = []
         total_images = Xs.shape[0]
 
         print(f"Training model for {epochs} epochs...")
@@ -132,6 +133,11 @@ class NeuralNetwork():
                 if i%5000 == 0:
                     elapsed_time = time.time() - elapsed_time
                     print(f"Images processed: {i}, Elapsed time", format_time(elapsed_time), "...")
+
+                    if (i >= 5000):
+                        timestep_loss, timestep_accuracy = self.evaluate(Xs[(i-5000):i], Ys[(i-5000):i])
+                        execution_history_loss.append(timestep_loss)
+                        execution_history_accuracy.append(timestep_accuracy)
 
                 input_image = Xs[i].reshape((1,self.input_shape))
                 target = Ys[i].reshape((1,self.output_shape))
@@ -152,7 +158,7 @@ class NeuralNetwork():
         execution__time = time.time() - execution_start_time
         print(f"Execution time {format_time(execution__time)} (HH:MM:SS)")
 
-        return history
+        return (history, execution_history_loss, execution_history_accuracy)
     
     
     def forward_pass(self, input_data): # ✅  
@@ -215,16 +221,16 @@ class NeuralNetwork():
         # ∂C/∂aLj=(aLj−yj)
         cost_aoj = (ao - y) # error in output layer, depends on firstly 
         # from derivative of cost function wrt activation from a(L-1), w(L), b(L) 
-        sigmoid_prime_o = ao * (1 - ao) # derivative of activation a0 OR also sigmoid(z(L))
+        sigmoid_prime_o = ao * (1 - ao) # ~ z(1-z) derivative of activation a0 OR also sigmoid(z(L)), these are different zs
         # since d sigmoid(x) / d(x) = sigmoid(x) * (1 - sigmoid(x))
-        δ_wo = cost_aoj * sigmoid_prime_o # Hadamard product computed since both are arrays - delta (weight update value) for output layer
+        δ_o = cost_aoj * sigmoid_prime_o # Hadamard product computed since both are arrays - delta (weight update value) for output layer
         
         # for the next hidden layer layer (wl+1)Tδx,l+1) is used to get cost_ahj
-        cost_ahj = (np.dot(wo, δ_wo.T)).T
+        cost_ahj = (np.dot(wo, δ_o.T)).T
         sigmoid_prime_h = ah * (1 - ah)
-        δ_wh = cost_ahj * sigmoid_prime_h
+        δ_h = cost_ahj * sigmoid_prime_h
         
-        deltas = [δ_wh, δ_wo] # correct order
+        deltas = [δ_h, δ_o] # correct order
         return deltas
             
             
@@ -237,16 +243,15 @@ class NeuralNetwork():
         
         '''
         [ah, ao] = layer_inputs
-        [δ_wh, δ_wo] = deltas
+        [δ_h, δ_o] = deltas
         
-        self.weights_[1] -= lr * np.dot(ao.T, δ_wo) # gradient descent rule for weights
+        self.weights_[1] -= lr * np.dot(ao.T, δ_o) # gradient descent rule for weights
         # update factor => - learning rate * ∑x δ(x,l) * (ax(L−1)).T
-        self.biases_[1] -= lr * np.sum(δ_wo)
+        self.biases_[1] -= lr * np.sum(δ_o)
 
-        self.weights_[0] -= lr * np.dot(ah.T, δ_wh)
-        self.biases_[0] -= lr * np.sum(δ_wh)
-        
- 
+        self.weights_[0] -= lr * np.dot(ah.T, δ_h)
+        self.biases_[0] -= lr * np.sum(δ_h)
+
 
     def predict(self, Xs): # ✅
         '''Returns the model predictions (output of the last layer) for the given "Xs".'''
@@ -330,10 +335,39 @@ class NeuralNetwork():
             self.weights_ = pickle.load(infile)
 
 
-    def savePlot(self, execution_time, lr):
+    def savePlot(self, history, lr, execution_history_loss=[], execution_history_accuracy=[]): # only used by training
         '''function to plot the execution time versus learning rate plot
         You can edit the parameters passed to the savePlot function'''
-        # plt.savefig(fileName)
+        # history contains losses
+        if execution_history_loss != []:
+            time_steps = len(execution_history_loss)
+            plt.figure()
+            plt.plot(np.arange(0, time_steps), execution_history_loss, label="loss")
+            plt.title(f"Training Loss with Learning Rate {lr}")
+            plt.xlabel("Execution Time Step (for every new 5000 images processed) #")
+            plt.ylabel("Training Loss")
+            plt.savefig("execution_loss_"+str(lr)+".png")
+            plt.show()
+
+        if execution_history_accuracy != []:
+            time_steps = len(execution_history_accuracy)
+            plt.figure()
+            plt.plot(np.arange(0, time_steps), execution_history_accuracy, label="accuracy")
+            plt.title(f"Training Accuracy with Learning Rate {lr}")
+            plt.xlabel("Execution Time Step (for every new 5000 images processed) #")
+            plt.ylabel("Training Accuracy")
+            plt.savefig("execution_accuracy_"+str(lr)+".png")
+            plt.show()
+
+
+        epochs = len(history)
+        plt.figure()
+        plt.plot(np.arange(1, epochs+1), history, label="loss")
+        plt.title(f"Training Loss with Learning Rate {lr}")
+        plt.xlabel("Epoch #")
+        plt.ylabel("Loss")
+        plt.savefig("epoch_loss_"+str(lr)+".png")
+        plt.show()
 
 
 '''
@@ -342,7 +376,8 @@ python3 Network.py test test.txt test-labels.txt netWeights.txt
 '''
 def main(): 
     train_file, test_file, train_labels_file, test_labels_file, net_weights_file = "", "", "", "", ""
-    lr = 1 # picked from the three values (0.01, 0.1, 1) works amazing, moderately large step size required
+    lr = 0.1 # picked from the three values (0.01, 0.1, 1) works amazing, moderately large step size required,
+    # most stable
     mode = sys.argv[1]
     NN = NeuralNetwork()
     np.random.seed(123) # for predictability
@@ -366,9 +401,9 @@ def main():
         y_train = read_filelines(train_labels_file) # list of strings with all class labels for training dataset
         y_train = NN.generate_labels(y_train) # convert labels to one hot encoded ones
         
-        history = NN.fit(x_train, y_train, 2, lr)
+        history, execution_history_loss, execution_history_accuracy = NN.fit(x_train, y_train, 2, lr)
 
-        # NN.savePlot("train_plot.jpg")
+        NN.savePlot(history, lr, execution_history_loss, execution_history_accuracy)
         NN.save_weights("netWeights.txt")
         
     

@@ -1,0 +1,15 @@
+CS 331 Artificial Intelligence - Assignment 3 Part 2 - Report
+Zoraiz Qureshi
+21100130
+
+Used Bernoulli Naive Bayes Classifier to classify normal and abnormal patients
+from test data provided with a well defined class. First read the training data, 
+and calculating prior probabilities for the two classes (C1 = Normal, C2 = Abnormal), 
+then split the data rows according to these classes into two and stored them. 
+For performance purposes, computed class-based likelihoods of all data rows for training data
+and stored them inside a dictionary for memoization during test mode.
+
+On test mode, test rows are stringified and checked if their likelihood already exists in the
+dictionary created and values are memoized otherwise for new rows, likelihoods of these test rows 
+are calculated on the spot. By comparing prior * likelihoods for both classes, the max is selected
+as the predicted result and compared with the test label for calculation of accuracy (77.54).
